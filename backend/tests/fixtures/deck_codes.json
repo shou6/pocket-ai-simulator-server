@@ -5,7 +5,7 @@
   "energies": [
    7
   ],
-  "decklist": "Energy: Darkness\n1 P-A 002\n2 B2 145\n2 B4a 067\n2 B4 148\n2 A4b 373\n2 A2 150\n2 B1 225\n2 B4 103\n1 B1 151\n2 B4a 042\n2 B4a 043\n"
+  "decklist": "Energy: Darkness\n2 A2 150\n1 B1 151\n2 B1 225\n2 B2 145\n2 B4 103\n2 B4 148\n2 B4a 042\n2 B4a 043\n2 B4a 067\n1 P-A 002\n2 P-A 007\n"
  },
  {
   "name": "炎",
@@ -13,7 +13,7 @@
   "energies": [
    2
   ],
-  "decklist": "Energy: Fire\n2 A2b 111\n2 A3 144\n2 B1 217\n2 A4b 373\n1 A1 225\n1 A2 150\n2 B1 225\n2 B4 155\n2 B1 033\n2 B1 036\n2 A3b 010\n"
+  "decklist": "Energy: Fire\n1 A1 225\n1 A2 150\n2 A3 144\n2 A3b 010\n2 B1 033\n2 B1 036\n2 B1 217\n2 B1 225\n2 B4 155\n2 P-A 005\n2 P-A 007\n"
  },
  {
   "name": "草",
@@ -21,7 +21,7 @@
   "energies": [
    1
   ],
-  "decklist": "Energy: Grass\n1 P-A 002\n1 B3 147\n2 A3 147\n2 A4b 373\n1 A1 225\n1 A2 150\n2 B1 225\n2 B3 153\n2 A2 017\n1 A2 018\n2 B4 011\n1 B2 017\n2 A4 021\n"
+  "decklist": "Energy: Grass\n1 A1 225\n2 A2 017\n1 A2 018\n1 A2 150\n2 A3 147\n2 A4 021\n2 B1 225\n1 B2 017\n1 B3 147\n2 B3 153\n2 B4 011\n1 P-A 002\n2 P-A 007\n"
  },
  {
   "name": "超+鋼",
@@ -30,7 +30,7 @@
    2,
    8
   ],
-  "decklist": "Energy: Fire, Metal\n2 A2b 111\n2 B1 217\n2 A2 148\n2 A4b 373\n1 A1 225\n1 A2 150\n1 A2b 070\n2 A3a 069\n2 B1 225\n1 B4 155\n2 B4a 007\n2 B2 023\n"
+  "decklist": "Energy: Fire, Metal\n1 A1 225\n2 A2 148\n1 A2 150\n1 A2b 070\n2 A3a 069\n2 B1 217\n2 B1 225\n2 B2 023\n1 B4 155\n2 B4a 007\n2 P-A 005\n2 P-A 007\n"
  },
  {
   "name": "超",
@@ -38,7 +38,7 @@
   "energies": [
    5
   ],
-  "decklist": "Energy: Psychic\n1 A2b 111\n1 B3 147\n1 B3b 064\n2 A4b 373\n1 A1 225\n1 A2 150\n2 B1 225\n1 B2 153\n2 B2b 040\n2 B1 184\n2 B3a 020\n1 A4a 059\n2 B1 196\n1 B1 102\n"
+  "decklist": "Energy: Psychic\n1 A1 225\n1 A2 150\n1 A4a 059\n1 B1 102\n2 B1 184\n2 B1 196\n2 B1 225\n1 B2 153\n2 B2b 040\n1 B3 147\n2 B3a 020\n1 B3b 064\n1 P-A 005\n2 P-A 007\n"
  },
  {
   "name": "闘",
@@ -46,7 +46,7 @@
   "energies": [
    6
   ],
-  "decklist": "Energy: Fighting\n1 P-A 002\n2 A2b 111\n1 B2 145\n1 B3 147\n2 A4b 373\n1 A2 150\n1 A2b 070\n2 B1 225\n1 B3 149\n1 B3 154\n2 B3 079\n1 A2 092\n2 B3 081\n1 A1 154\n1 B3 078\n"
+  "decklist": "Energy: Fighting\n1 A1 154\n1 A2 092\n1 A2 150\n1 A2b 070\n2 B1 225\n1 B2 145\n1 B3 078\n2 B3 079\n2 B3 081\n1 B3 147\n1 B3 149\n1 B3 154\n1 P-A 002\n2 P-A 005\n2 P-A 007\n"
  },
  {
   "name": "雷",
@@ -54,7 +54,7 @@
   "energies": [
    4
   ],
-  "decklist": "Energy: Lightning\n2 A2b 111\n2 A2 147\n2 A4b 373\n1 A1 225\n2 A2 150\n2 B1 225\n1 B2 153\n2 B1 184\n2 B1 081\n2 B4a 058\n2 B4a 059\n"
+  "decklist": "Energy: Lightning\n1 A1 225\n2 A2 147\n2 A2 150\n2 B1 081\n2 B1 184\n2 B1 225\n1 B2 153\n2 B4a 058\n2 B4a 059\n2 P-A 005\n2 P-A 007\n"
  },
  {
   "name": "mydeck_sample003_qr",
@@ -62,6 +62,6 @@
   "energies": [
    3
   ],
-  "decklist": "Energy: Water\n2 A2b 111\n1 A4 151\n2 B4a 068\n2 A4b 373\n1 A1 225\n1 A2 150\n1 A3 149\n1 B2 150\n1 B4 154\n2 A3 040\n2 B2 029\n2 B4a 058\n2 B4a 059\n"
+  "decklist": "Energy: Water\n1 A1 225\n1 A2 150\n2 A3 040\n1 A3 149\n1 A4 151\n2 B2 029\n1 B2 150\n1 B4 154\n2 B4a 058\n2 B4a 059\n2 B4a 068\n2 P-A 005\n2 P-A 007\n"
  }
 ]

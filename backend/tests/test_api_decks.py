@@ -30,6 +30,19 @@ def test_validate_accepts_a_proper_deck_and_names_its_cards(api: TestClient) -> 
     assert body["deck"]["cards"][0]["card"]["kind"] == "ポケモン"
 
 
+def test_validate_shows_reprints_as_the_lowest_rarity_print(api: TestClient) -> None:
+    """クラウンや ★2 の再録で書かれていても、画面にはレアリティの低い印刷でそろえて返す。"""
+    mixed = SAMPLE.replace("2 A2b 111", "1 A2b 111\n1 P-A 005").replace("P-A 007", "A4b 373")
+    body = api.post("/decks/validate", json={"decklist": mixed}).json()
+    assert body["ok"] is True
+    rows = {row["card"]["id"]: row["count"] for row in body["deck"]["cards"]}
+    assert rows["P-A 005"] == 2
+    assert "A2b 111" not in rows
+    assert "A4b 373" not in rows
+    assert "A2b 111" not in body["deck"]["decklist"]
+    assert body["deck"]["size"] == 20
+
+
 def test_validate_explains_what_is_wrong(api: TestClient) -> None:
     short = "\n".join(SAMPLE.splitlines()[:-1])
     body = api.post("/decks/validate", json={"decklist": short}).json()

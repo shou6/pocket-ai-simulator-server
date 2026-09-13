@@ -82,8 +82,12 @@ def _by_id() -> dict[str, CardView]:
 
 
 def card_view(card_id: str) -> CardView | None:
-    """そのカードの表示用情報。知らない ID なら `None`。"""
-    return _by_id().get(card_id)
+    """そのカードの表示用情報。知らない ID なら `None`。
+
+    再録・レアリティ違いは、レアリティの低い代表の印刷で返す（`DeckBuilderIds.canonical`）。
+    画面でクラウンやプロモが混ざらないようにする。効果は同じなので、どれを返しても評価は変わらない。
+    """
+    return _by_id().get(deck_builder_ids().canonical(card_id))
 
 
 def search_cards(query: str, *, limit: int = 30) -> list[CardView]:
@@ -137,7 +141,11 @@ _KIND_ORDER = {"ポケモン": 0, "グッズ": 1, "ポケモンのどうぐ": 2,
 
 
 def deck_view(recipe: DeckRecipe) -> DeckView:
-    """デッキを表示用にする。ポケモン → トレーナーズの順に並べる。"""
+    """デッキを表示用にする。ポケモン → トレーナーズの順に並べる。
+
+    再録は代表の印刷にまとめる。返すデッキリストもまとめた後のもので、画面はこれを保存して使う。
+    """
+    recipe = deck_builder_ids().canonical_recipe(recipe)
     rows: list[DeckCard] = []
     for card_id, count in recipe.cards:
         view = card_view(card_id) or CardView(
