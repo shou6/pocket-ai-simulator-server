@@ -1,0 +1,86 @@
+[project]
+name = "pocket-api"
+version = "0.1.0"
+description = "Pokemon TCG Pocket deck optimizer: API, workers, data pipeline"
+readme = "README.md"
+authors = [{ name = "shou6" }]
+requires-python = ">=3.13"
+license = "AGPL-3.0-only"
+dependencies = [
+    "alembic>=1.19.2",
+    "fastapi[standard]>=0.141.1",
+    "httpx>=0.28.1",
+    "psycopg[binary]>=3.3.5",
+    "pydantic-settings>=2.15.0",
+    "scikit-learn>=1.9.0",
+    "sqlalchemy>=2.0.52",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.3,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "maturin>=1.15.0",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.6",
+]
+
+# --- ruff ---------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "N",        # naming
+    "SIM",      # simplify
+    "RUF",      # ruff 固有
+    "PT",       # pytest スタイル
+    "ANN",      # 型注釈
+]
+ignore = [
+    "ANN401",   # Any の使用（FastAPI の依存注入で必要になる）
+    "RUF001", "RUF002", "RUF003",  # 日本語コメント・docstring の全角記号を許可
+]
+
+[tool.ruff.lint.isort]
+# src からの推測に頼らず自分のコードだと明示する。エディタなど別の呼ばれ方で
+# project_root がずれても、import の並び順が変わらないようにするため。
+known-first-party = ["pocket_api"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+"alembic/**" = ["ANN", "E402"]
+
+# --- mypy ---------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+packages = ["pocket_api"]
+plugins = ["pydantic.mypy"]
+exclude = ["alembic/"]
+
+[[tool.mypy.overrides]]
+# scikit-learn は型情報を配布していない（py.typed がない）
+module = ["pocket_engine_py", "sklearn.*"]
+ignore_missing_imports = true
+
+# --- pytest -------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.coverage.run]
+source = ["pocket_api"]
+branch = true

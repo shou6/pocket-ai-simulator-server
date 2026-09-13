@@ -1,0 +1,21 @@
+# Per-file license information (REUSE Specification 3.3, https://reuse.software/spec-3.3/).
+# Full license texts are in LICENSES/. Third-party works are described in THIRD_PARTY_NOTICES.md.
+# When several tables match a file, the last one wins.
+version = 1
+
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = "2026 shou6"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+# Japanese card names extracted from Bulbapedia
+[[annotations]]
+path = ["data/cards/names_ja.json", "data/cards/name_overrides.json"]
+SPDX-FileCopyrightText = ["Bulbapedia contributors <https://bulbapedia.bulbagarden.net>", "2026 shou6"]
+SPDX-License-Identifier = "CC-BY-NC-SA-2.5"
+
+# Deck code card IDs generated from pokemon-tcg-pocket-database
+[[annotations]]
+path = "data/cards/deck_builder_ids.json"
+SPDX-FileCopyrightText = ["2025 Jon (flibustier)", "2026 shou6"]
+SPDX-License-Identifier = "MIT"

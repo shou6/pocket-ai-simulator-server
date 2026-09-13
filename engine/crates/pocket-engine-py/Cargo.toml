@@ -1,0 +1,18 @@
+[package]
+name = "pocket-engine-py"
+description = "Python bindings for pocket-engine (built with maturin / PyO3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "pocket_engine_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+pocket-engine = { workspace = true }
+pyo3 = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,33 @@
+{
+  "batchcomplete": "",
+  "query": {
+    "redirects": [
+      {"from": "Mewtwo ex (Genetic Apex 262)", "to": "Mewtwo ex (Genetic Apex 129)"}
+    ],
+    "pages": {
+      "1": {
+        "pageid": 1,
+        "ns": 0,
+        "title": "Butterfree (Everyday Wonders 3)",
+        "revisions": [{"slots": {"main": {"*": "{{TCG Card Infobox/Pokémon/Pocket\n|en name=Butterfree\n|ja name=バタフリー\n|trans name=Butterfree\n|species=Butterfree\n|type=Grass\n}}\n\n==Card text==\n{{Cardtext/Header/Pocket|type=Grass}}\n{{Cardtext/Ability/Pocket\n|type=Grass\n|name=Sunny Cocoon\n|jname=ひなたのマユ\n|jtrans=Sunny Cocoon\n|effect=Once during your turn, you may heal 20 damage.\n}}\n{{Cardtext/Attack/Pocket\n|type=Grass\n|cost={{e|Grass}}\n|name=Sunny Wind\n|jname=おひさまウインド\n|jtrans=Sun Wind\n|damage=60\n|effect=Heal 20 damage from this Pokémon.\n}}\n{{Cardtext/Footer}}\n"}}}]
+      },
+      "2": {
+        "pageid": 2,
+        "ns": 0,
+        "title": "Mewtwo ex (Genetic Apex 129)",
+        "revisions": [{"slots": {"main": {"*": "{{TCG Card Infobox/Pokémon/Pocket\n|en name=Mewtwo {{TCGP Icon|ex}}\n|ja name=ミュウツー{{TCGP Icon|ex}}\n|trans name=Mewtwo {{TCGP Icon|ex}}\n}}\n==Card text==\n{{Cardtext/Attack/Pocket\n|type=Psychic\n|cost={{e|Psychic}}{{e|Colorless}}\n|name=Psychic Sphere\n|jname=ねんどうだん\n|jtrans=Psychokinetic Projectile\n|damage=50\n|effect=\n}}\n{{Cardtext/Attack/Pocket\n|type=Psychic\n|name=Psydrive\n|jname=サイコドライブ\n|damage=150\n}}\n{{Cardtext/Footer}}\n"}}}]
+      },
+      "3": {
+        "pageid": 3,
+        "ns": 0,
+        "title": "Sabrina (Genetic Apex 225)",
+        "revisions": [{"slots": {"main": {"*": "{{TCG Card Infobox/Trainer/Pocket\n|en name=Sabrina\n|ja name=ナツメ\n|trans name=Natsume\n|subtype=Supporter\n}}\n"}}}]
+      },
+      "-1": {
+        "ns": 0,
+        "title": "Castform Sunny Form (Mega Rising 29)",
+        "missing": ""
+      }
+    }
+  }
+}

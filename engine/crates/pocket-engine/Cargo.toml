@@ -1,0 +1,21 @@
+[package]
+name = "pocket-engine"
+description = "Pokemon TCG Pocket rule engine and match simulator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# ルールエンジン本体（AGPL-3.0）。コミット固定。更新手順は .claude/rules/engine.md
+# 未実装カードを自分で実装するため、本家をフォークして使う（docs/adr/0003-fork-deckgym-core.md）。
+# 差分は docs/deckgym-fork.md にまとめる。rev の更新は単独のコミットで行う
+deckgym = { git = "https://github.com/shou6/deckgym-core", rev = "b2585ade2a331b8463f8a875c8645e114de3a54d", version = "0.1.0" }
+rand = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

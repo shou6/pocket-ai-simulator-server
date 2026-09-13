@@ -1,0 +1,21 @@
+# Rust
+engine/target/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+
+# Local fork checkout used by the [patch] section during development
+/vendor/
+
+# Data fetched or generated locally
+data/raw/
+data/meta/
+data/surrogate/
+
+.env

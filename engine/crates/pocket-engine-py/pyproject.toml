@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pocket-engine-py"
+version = "0.1.0"
+description = "Python bindings for the Pokemon TCG Pocket rule engine"
+requires-python = ">=3.13"
+license = "AGPL-3.0-only"
+
+[tool.maturin]
+module-name = "pocket_engine_py"
+features = ["pyo3/extension-module"]
