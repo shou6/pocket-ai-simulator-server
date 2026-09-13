@@ -114,6 +114,53 @@ def test_diagnose_returns_rates_with_their_precision(seeded: TestClient) -> None
     assert body["matchups"][0]["name_ja"]
 
 
+def test_diagnose_lists_each_game_and_replays_it(seeded: TestClient) -> None:
+    """診断の各試合の結果（前半が先攻）を返し、その 1 試合をログ付きで再現できる。"""
+    body = seeded.post("/decks/diagnose", json={"decklist": SAMPLE, "games": 60}).json()
+    matchup = body["matchups"][0]
+    outcomes = matchup["outcomes"]
+    assert len(outcomes) == 60
+    assert set(outcomes) <= set("wltu")
+    firsts = outcomes[:30]
+    decided = [o for o in firsts if o != "u"]
+    score = sum({"w": 1.0, "t": 0.5}.get(o, 0.0) for o in decided) / len(decided)
+    assert score == pytest.approx(matchup["going_first"])
+
+    index = 45  # 後攻の試合
+    response = seeded.post(
+        "/decks/replay",
+        json={"decklist": SAMPLE, "opponent": matchup["name"], "games": 60, "index": index},
+    )
+    assert response.status_code == 200
+    replay = response.json()
+    assert replay["index"] == index
+    assert replay["me_first"] is False
+    assert (
+        replay["outcome"]
+        == {"w": "win", "l": "loss", "t": "tie", "u": "unfinished"}[outcomes[index]]
+    )
+    assert replay["opponent_ja"] == matchup["name_ja"]
+    assert len(replay["steps"]) > 10
+    step = replay["steps"][0]
+    assert step["no"] == 1
+    assert step["actor"] == "opp", "後攻の試合は相手から動く"
+    assert set(step) >= {"turn", "text", "me", "opp", "stadium", "hand"}
+    assert len(replay["opening"]["me"]) == 5
+    last = replay["steps"][-1]
+    assert (last["me"]["points"], last["opp"]["points"]) == (
+        replay["points"]["me"],
+        replay["points"]["opp"],
+    )
+
+
+def test_replay_refuses_unknown_opponents_and_games(seeded: TestClient) -> None:
+    unknown = {"decklist": SAMPLE, "opponent": "No Such Deck", "games": 60, "index": 0}
+    assert seeded.post("/decks/replay", json=unknown).status_code == 404
+    names = [m["name"] for m in seeded.get("/meta/decks").json()["decks"]]
+    beyond = {"decklist": SAMPLE, "opponent": names[0], "games": 60, "index": 60}
+    assert seeded.post("/decks/replay", json=beyond).status_code == 422
+
+
 def test_diagnose_only_accepts_the_three_game_options(seeded: TestClient) -> None:
     response = seeded.post("/decks/diagnose", json={"decklist": SAMPLE, "games": 100})
     assert response.status_code == 422

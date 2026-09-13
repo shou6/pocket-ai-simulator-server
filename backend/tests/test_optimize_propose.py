@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pocket_api.optimize.cli import load_meta
 from pocket_api.optimize.constraints import DeckConstraints
+from pocket_api.optimize.progress import WorkMeter
 from pocket_api.optimize.propose import SearchSettings, propose
 
 SNAPSHOT = Path("/workspace/data/meta/2026-09-07_B4a-standard.json")
@@ -48,3 +49,12 @@ def test_every_proposal_contains_the_axis_card_and_reports_progress(tmp_path: Pa
     assert stages[-1] == "finalize"
     rates = [evaluation.win_rate for _, evaluation in report.ranked]
     assert rates == sorted(rates, reverse=True)
+
+
+def test_counts_the_work_of_the_search() -> None:
+    decks = load_meta(SNAPSHOT)[:3]
+    meter = WorkMeter()
+    propose(decks, settings=TINY, target=decks[0].name, meter=meter)
+    # 集団 3 ×（世代 1 + 1）+ 山登り（1 + 1 手 × 3 件）+ 測り直し 2 件 ×（4 / 4）
+    assert meter.total == 3 * 2 + (1 + 1 * 3) + 2 * 1
+    assert meter.done == meter.total

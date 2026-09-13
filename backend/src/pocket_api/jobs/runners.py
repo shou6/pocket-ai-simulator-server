@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ from pocket_api.db.meta import snapshot_archetypes, snapshot_decks
 from pocket_api.optimize.archetype import MetaArchetype, classify
 from pocket_api.optimize.evaluate import Evaluation, weighted_interval
 from pocket_api.optimize.improve_cli import delta_noise, judge_delta
+from pocket_api.optimize.progress import WorkMeter, WorkStatus
 from pocket_api.optimize.propose import MetaDeck, SearchSettings, propose
 from pocket_api.optimize.recipe import DeckRecipe
 from pocket_api.optimize.refine import RefineSettings, refine_deck
@@ -84,9 +85,24 @@ def optimize_settings(games: int) -> SearchSettings:
     return SearchSettings(strategy=STRATEGY, games=60, report_games=200)
 
 
-Progress = Callable[[str, str], None]
+class Progress(Protocol):
+    """ワーカーへの進捗の報告。`work` は済んだ仕事の量と残り時間。"""
+
+    def __call__(self, stage: str, detail: str, work: WorkStatus | None = None) -> None: ...
+
+
 SessionFactory = Callable[[], AbstractContextManager[Any]]
 Runner = Callable[[dict[str, Any], Progress], dict[str, Any]]
+
+
+def _metered(progress: Progress) -> tuple[WorkMeter, Callable[[str, str], None]]:
+    """探索に渡す進捗の報告。報告のたびに、数えた仕事の量を添える。"""
+    meter = WorkMeter()
+
+    def report(stage: str, detail: str) -> None:
+        progress(stage, detail, meter.status())
+
+    return meter, report
 
 
 class SwapStepOut(BaseModel):
@@ -193,12 +209,14 @@ def run_improve(
     settings = refine_settings(games)
     meta, archetypes = _meta(open_session, str(params["snapshot_id"]))
     decklist = str(params["decklist"])
+    meter, report_progress = _metered(progress)
     report = refine_deck(
         decklist,
         [(d.name, d.share, d.decklist) for d in meta],
         settings=settings,
         excluded=set(params.get("excluded", [])),
-        progress=progress,
+        progress=report_progress,
+        meter=meter,
     )
     shares = {d.name: d.share for d in meta}
     names = translator()
@@ -256,13 +274,15 @@ def run_optimize(
     meta, archetypes = _meta(open_session, str(params["snapshot_id"]))
     target = params.get("target")
     required = {str(k): int(v) for k, v in dict(params.get("required", {})).items()}
+    meter, report_progress = _metered(progress)
     report = propose(
         meta,
         settings=settings,
         target=target,
         required=required,
         excluded=set(params.get("excluded", [])),
-        progress=progress,
+        progress=report_progress,
+        meter=meter,
     )
     shares = {d.name: d.share for d in meta}
     names = translator()

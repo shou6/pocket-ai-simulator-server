@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,11 +20,12 @@ from sqlalchemy.orm import Session
 
 from pocket_api.api.decks import DeckProblem, GameOption, check_deck
 from pocket_api.api.deps import get_session
-from pocket_api.api.meta import latest_meta
+from pocket_api.api.meta import latest_meta, meta_opponents
 from pocket_api.cards.catalog import card_view
+from pocket_api.db.meta import latest_snapshot, snapshot_decks
 from pocket_api.db.models import OptimizationJob
 from pocket_api.jobs import queue
-from pocket_api.jobs.estimates import all_estimates, estimate
+from pocket_api.jobs.estimates import all_estimates, estimate, remaining_seconds
 from pocket_api.jobs.runners import IMPROVE_METHOD, STRATEGY, canonical_params
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -47,7 +48,13 @@ class JobOut(BaseModel):
     """所要時間の目安。同じ種類・試合数で終わったジョブの中央値。進捗の割合の代わりに出す。"""
 
     estimate_samples: int = 0
-    """目安の元にした記録の数。0 なら初期値（まだ実行した記録が無い）。"""
+    """目安の元にした記録の数。0 なら記録が無い。"""
+
+    estimate_basis: str = "default"
+    """目安の出どころ。`history`（記録）/ `speed`（ワーカーの速さで換算）/ `default`（定数）。"""
+
+    remaining_seconds: int | None = None
+    """実行中の残り時間。済んだ仕事の割合と経過時間から出す。探索が早く止まれば実際はもっと短い。"""
 
     reused: bool = False
     """同じ条件のジョブを使い回したか。完了済みなら「前回の結果」として見せる。"""
@@ -70,6 +77,8 @@ class JobOut(BaseModel):
             finished_at=job.finished_at,
             estimate_seconds=guess.seconds or None,
             estimate_samples=guess.samples,
+            estimate_basis=guess.basis,
+            remaining_seconds=remaining_seconds(job, datetime.now(UTC)),
             reused=reused,
             error=job.error.splitlines()[0] if job.error else None,
         )
@@ -167,29 +176,33 @@ def register_optimize(
 class EstimateOut(BaseModel):
     seconds: int
     samples: int
+    basis: str
+    """`history`（記録）/ `speed`（ワーカーの速さで換算）/ `default`（定数）。"""
 
 
 class EstimatesOut(BaseModel):
-    """ジョブの種類 → 試合数 → 所要時間の目安。画面の試合数の選択肢に添える。"""
+    """処理の種類 → 試合数 → 所要時間の目安。画面の試合数の選択肢に添える。"""
 
     improve: dict[int, EstimateOut]
     optimize: dict[int, EstimateOut]
+    diagnose: dict[int, EstimateOut]
+    """診断（ジョブにしない）。ワーカーの速さで換算する。API も同じ規模のマシンで動く前提。"""
 
 
 @router.get("/estimates", response_model=EstimatesOut)
 def get_estimates(session: Annotated[Session, Depends(get_session)]) -> EstimatesOut:
-    """所要時間の目安。これまでに終わったジョブの記録から出す。"""
-    found = all_estimates(session)
-    return EstimatesOut(
-        improve={
-            g: EstimateOut(seconds=e.seconds, samples=e.samples)
-            for g, e in found["improve"].items()
-        },
-        optimize={
-            g: EstimateOut(seconds=e.seconds, samples=e.samples)
-            for g, e in found["optimize"].items()
-        },
-    )
+    """所要時間の目安。ワーカーの速さと、これまでに終わったジョブの記録から出す。"""
+    snapshot = latest_snapshot(session)
+    opponents = len(meta_opponents(snapshot_decks(session, snapshot.id))) if snapshot else 0
+    found = all_estimates(session, opponents=opponents or 10)
+
+    def out(kind: str) -> dict[int, EstimateOut]:
+        return {
+            g: EstimateOut(seconds=e.seconds, samples=e.samples, basis=e.basis)
+            for g, e in found[kind].items()
+        }
+
+    return EstimatesOut(improve=out("improve"), optimize=out("optimize"), diagnose=out("diagnose"))
 
 
 def _job(session: Session, job_id: uuid.UUID) -> OptimizationJob:

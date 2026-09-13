@@ -19,28 +19,35 @@ from sqlalchemy.orm import Session
 
 from pocket_api.jobs import queue
 from pocket_api.jobs.runners import Runner, default_runners
+from pocket_api.jobs.speed import measure_speed, record_speed
+from pocket_api.optimize.progress import WorkStatus
 
 logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], AbstractContextManager[Session]]
 
 
-def run_once(open_session: SessionFactory, runners: Mapping[str, Runner]) -> bool:
+def run_once(
+    open_session: SessionFactory,
+    runners: Mapping[str, Runner],
+    *,
+    games_per_second: float | None = None,
+) -> bool:
     """待ちのジョブを 1 件実行する。実行したら `True`、無ければ `False`。
 
     取り出し・進捗・完了はそれぞれ別のトランザクションで書く。
     進捗をすぐにコミットしないと、API から見えない。
     """
     with open_session() as session:
-        job = queue.claim_next(session)
+        job = queue.claim_next(session, games_per_second=games_per_second)
         if job is None:
             return False
         job_id, kind, params = job.id, job.kind, dict(job.params)
     logger.info("ジョブ %s（%s）を始めます", job_id, kind)
 
-    def progress(stage: str, detail: str) -> None:
+    def progress(stage: str, detail: str, work: WorkStatus | None = None) -> None:
         with open_session() as session:
-            queue.report_progress(session, job_id, stage, detail)
+            queue.report_progress(session, job_id, stage, detail, work)
 
     runner = runners.get(kind)
     try:
@@ -71,9 +78,14 @@ def main(argv: list[str] | None = None) -> int:
         stale = queue.requeue_stale(session)
     if stale:
         logger.info("実行中のまま残っていた %d 件を待ちに戻しました", stale)
+    # このマシンの速さを測って残す。所要時間の目安をこの速さに合わせる（`jobs.estimates`）
+    games_per_second = measure_speed()
+    with session_scope() as session:
+        record_speed(session, games_per_second)
+    logger.info("対戦の速さ：毎秒 %.1f 試合", games_per_second)
     runners = default_runners(session_scope)
     while True:
-        worked = run_once(session_scope, runners)
+        worked = run_once(session_scope, runners, games_per_second=games_per_second)
         if args.once:
             return 0
         if not worked:

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from pocket_api.optimize.diagnose import unimplemented_cards
 from pocket_api.optimize.evaluate import Evaluation, Opponent, expected_win_rate
 from pocket_api.optimize.features import deck_features
 from pocket_api.optimize.improve import DEFAULT_STORE, load_screening_model
+from pocket_api.optimize.progress import WorkMeter
 from pocket_api.optimize.propose import INDEPENDENT_SEED_OFFSET
 from pocket_api.optimize.recipe import DeckRecipe
 from pocket_api.optimize.search import full_card_pool, hill_climb
@@ -101,8 +103,12 @@ def refine_deck(
     settings: RefineSettings | None = None,
     excluded: Collection[str] = (),
     progress: Progress = _ignore,
+    meter: WorkMeter | None = None,
 ) -> RefineReport:
-    """自分のデッキを、上がらなくなるまで 1 枚ずつ入れ替えて改善する。"""
+    """自分のデッキを、上がらなくなるまで 1 枚ずつ入れ替えて改善する。
+
+    `meter` を渡すと、仕事の量（デッキの評価 1 回を 1）を数える。画面の残り時間に使う。
+    """
     if settings is None:
         settings = RefineSettings()
     blocked = unimplemented_cards(decklist)
@@ -115,6 +121,7 @@ def refine_deck(
     constraints = DeckConstraints.of(excluded=excluded)
     cache = MatchupCache()
     evaluated: set[tuple[tuple[str, int], ...]] = set()
+    work = meter if meter is not None else WorkMeter()
 
     def score(recipe: DeckRecipe, step: int) -> float:
         if step == 0 and recipe.cards == base.cards:
@@ -126,7 +133,7 @@ def refine_deck(
                 f"{step + 1} 枚目の入れ替えを探しています（{len(evaluated)} 通りを評価）",
             )
         # 候補どうしを同じ試合の流れで比べる（共通乱数法）。手番でシードは変えない
-        return expected_win_rate(
+        rate = expected_win_rate(
             recipe.to_text(),
             opponents,
             strategy=settings.strategy,
@@ -134,6 +141,8 @@ def refine_deck(
             cache=cache,
             seed=settings.seed,
         ).win_rate
+        work.advance()
+        return rate
 
     pool = tuple(
         card_id for card_id in full_card_pool(base.energy) if not constraints.is_excluded(card_id)
@@ -147,6 +156,13 @@ def refine_deck(
             return trained.predict(deck_features(recipe.to_text()))
 
         predict = predict_with_model
+
+    # 仕事の量の見込み（上限）。1 手ごとに実評価するのは、
+    # モデルがあれば screen_keep 件、無ければ neighbours 件まで
+    per_step = settings.screen_keep if predict is not None else settings.neighbours
+    climb_work = 1 + settings.max_steps * per_step
+    recheck_work = math.ceil(settings.report_games / settings.games)
+    work.begin(climb_work + 2 * recheck_work)
 
     swaps: list[Swap] = []
 
@@ -167,6 +183,7 @@ def refine_deck(
         on_move=on_move,
     )
 
+    work.reach(climb_work)
     progress("finalize", "探索とは別の試合で、元のデッキと改善後を測り直しています")
 
     def remeasure(recipe: DeckRecipe) -> Evaluation:
@@ -180,7 +197,10 @@ def refine_deck(
         )
 
     base_evaluation = remeasure(base)
+    work.advance(recheck_work)
+    progress("finalize", "探索とは別の試合で、改善後のデッキを測り直しています")
     final_evaluation = base_evaluation if not swaps else remeasure(climbed.recipe)
+    work.advance(recheck_work)
     return RefineReport(
         base=base,
         final=climbed.recipe,

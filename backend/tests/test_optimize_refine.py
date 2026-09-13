@@ -6,6 +6,7 @@
 from pathlib import Path
 
 from pocket_api.optimize.diagnose import load_meta_decks
+from pocket_api.optimize.progress import WorkMeter
 from pocket_api.optimize.recipe import DeckRecipe
 from pocket_api.optimize.refine import RefineSettings, refine_deck
 
@@ -46,3 +47,34 @@ def test_climbs_from_the_deck_and_rechecks_before_and_after(tmp_path: Path) -> N
         assert report.final_evaluation == report.base_evaluation
     assert stages[0] == "prepare"
     assert stages[-1] == "finalize"
+
+
+def test_counts_the_work_so_the_remaining_time_can_be_shown(tmp_path: Path) -> None:
+    """仕事の量（デッキの評価 1 回を 1）を数え、見込みの上限を超えずに最後は上限に届く。"""
+    settings = RefineSettings(
+        strategy="p",
+        games=20,
+        report_games=40,
+        max_steps=2,
+        neighbours=4,
+        similar_width=4,
+        store=tmp_path / "none.jsonl",
+    )
+    meter = WorkMeter()
+    seen: list[tuple[int, int] | None] = []
+    refine_deck(
+        SAMPLE,
+        load_meta_decks(SNAPSHOT)[:3],
+        settings=settings,
+        progress=lambda _stage, _detail: seen.append(
+            (meter.done, meter.total) if meter.total else None
+        ),
+        meter=meter,
+    )
+    # 元のデッキ 1 + 2 手 × 4 件 + 測り直し（40 / 20 = 2）× 2 デッキ
+    assert meter.total == 1 + 2 * 4 + 2 * 2
+    assert meter.done == meter.total
+    progressed = [s for s in seen if s is not None]
+    assert progressed, "探索中に仕事の量を出す"
+    assert all(done <= total for done, total in progressed)
+    assert [d for d, _ in progressed] == sorted(d for d, _ in progressed)

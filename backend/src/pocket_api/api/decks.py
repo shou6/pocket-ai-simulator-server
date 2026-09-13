@@ -12,7 +12,7 @@ from typing import Annotated, Literal
 
 import pocket_engine_py as engine
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from pocket_api.api.deps import get_session
@@ -25,6 +25,7 @@ from pocket_api.optimize.archetype import MetaArchetype, classify
 from pocket_api.optimize.diagnose import diagnose_against, unimplemented_cards
 from pocket_api.optimize.improve_cli import delta_noise, judge_delta
 from pocket_api.optimize.recipe import DeckRecipe
+from pocket_api.optimize.replay import replay_diagnosis_game
 
 router = APIRouter(prefix="/decks", tags=["decks"])
 
@@ -156,6 +157,13 @@ class MatchupOut(BaseModel):
     interval: tuple[float, float]
     going_first: float
     going_second: float
+    outcomes: str
+    """試合ごとの結果を 1 文字ずつ（`w` 勝ち / `l` 負け / `t` 引き分け / `u` 決着なし）。
+    前半（奇数なら 1 試合多い）がこちらの先攻。
+    番号を `POST /decks/replay` に渡すと、その試合のログを返す。"""
+
+
+_OUTCOME_LETTERS = {"win": "w", "loss": "l", "tie": "t", "unfinished": "u"}
 
 
 class DiagnosisOut(BaseModel):
@@ -220,12 +228,135 @@ def diagnose(body: DiagnoseIn, session: Annotated[Session, Depends(get_session)]
                 interval=m.interval,
                 going_first=m.going_first,
                 going_second=m.going_second,
+                outcomes="".join(_OUTCOME_LETTERS[o] for o in m.outcomes),
             )
             for m in result.matchups
         ],
         precision=Precision(strategy=STRATEGY, games=body.games, noise=delta_noise(body.games)),
         snapshot_fetched_at=snapshot.fetched_at.isoformat(),
         elapsed_seconds=time.perf_counter() - started,
+    )
+
+
+class ReplayIn(BaseModel):
+    decklist: str
+    opponent: str
+    """相手のアーキタイプ名（診断結果の `matchups[].name`）。"""
+
+    games: GameOption = 200
+    """診断したときの試合数。試合ごとのシードはこれで決まる。"""
+
+    index: int = Field(ge=0)
+    """試合の番号（0 始まり）。"""
+
+
+class _Attrs(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ReplayCardOut(_Attrs):
+    id: str
+    name_ja: str
+
+
+class ReplayPokemonOut(_Attrs):
+    id: str
+    name_ja: str
+    hp: int
+    max_hp: int
+    energy: list[str]
+    status: list[str]
+    tools: list[str]
+
+
+class ReplaySideOut(_Attrs):
+    points: int
+    hand: int
+    deck: int
+    active: ReplayPokemonOut | None
+    bench: list[ReplayPokemonOut]
+
+
+class ReplayStepOut(_Attrs):
+    no: int
+    turn: int
+    actor: Literal["me", "opp"]
+    text: str
+    me: ReplaySideOut
+    opp: ReplaySideOut
+    stadium: ReplayCardOut | None
+    stadium_mine: bool
+    hand: list[ReplayCardOut]
+    drew: bool
+
+
+class ReplayPointsOut(BaseModel):
+    me: int
+    opp: int
+
+
+class ReplayOpeningOut(BaseModel):
+    me: list[ReplayCardOut]
+    opp: list[ReplayCardOut]
+
+
+class ReplayOut(BaseModel):
+    """診断の 1 試合の対戦ログ。保存せず、頼まれるたびに同じ試合を回し直す。"""
+
+    index: int
+    me_first: bool
+    outcome: Literal["win", "loss", "tie", "unfinished"]
+    points: ReplayPointsOut
+    turns: int
+    opponent: str
+    opponent_ja: str
+    opening: ReplayOpeningOut
+    steps: list[ReplayStepOut]
+
+
+@router.post(
+    "/replay",
+    response_model=ReplayOut,
+    responses={404: {"description": "相手が見つからない"}, 422: {"model": DeckProblem}},
+)
+def replay(body: ReplayIn, session: Annotated[Session, Depends(get_session)]) -> ReplayOut:
+    """診断した 1 試合を、行動ごとの盤面つきで返す。1 試合なので数十ミリ秒で終わる。"""
+    validation = check_deck(body.decklist)
+    if not validation.ok:
+        raise HTTPException(
+            status_code=422,
+            detail=DeckProblem(
+                message="このデッキは評価できません", validation=validation
+            ).model_dump(),
+        )
+    if body.index >= body.games:
+        raise HTTPException(
+            status_code=422, detail=f"{body.games} 試合のうち {body.index} 試合目はありません"
+        )
+    _, decks = latest_meta(session)
+    opponent = next(
+        (text for name, _, text in meta_opponents(decks) if name == body.opponent), None
+    )
+    if opponent is None:
+        raise HTTPException(
+            status_code=404, detail=f"相手のデッキが見つかりません: {body.opponent}"
+        )
+    game = replay_diagnosis_game(
+        body.decklist, opponent, strategy=STRATEGY, games=body.games, index=body.index
+    )
+    return ReplayOut(
+        index=game.index,
+        me_first=game.me_first,
+        outcome=game.outcome,
+        points=ReplayPointsOut(me=game.points_me, opp=game.points_opp),
+        turns=game.turns,
+        opponent=body.opponent,
+        opponent_ja=translator().text(body.opponent),
+        opening=ReplayOpeningOut(
+            me=[ReplayCardOut.model_validate(c) for c in game.opening_me],
+            opp=[ReplayCardOut.model_validate(c) for c in game.opening_opp],
+        ),
+        steps=[ReplayStepOut.model_validate(step) for step in game.steps],
     )
 
 

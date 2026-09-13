@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from pocket_api.api.cards import router as cards_router
 from pocket_api.api.decks import router as decks_router
@@ -21,6 +22,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # 対戦ログ（1 試合で数百 KB の JSON）を縮めて返す
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.include_router(health_router)
     app.include_router(meta_router)
     app.include_router(decks_router)

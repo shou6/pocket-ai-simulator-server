@@ -46,6 +46,10 @@ class MatchupResult:
     games: int
     """回した試合数。"""
 
+    outcomes: tuple[str, ...] = ()
+    """試合ごとの結果（`win` / `loss` / `tie` / `unfinished`）。前半がこちらの先攻。
+    `replay.replay_diagnosis_game` に番号を渡すと、その試合をログ付きで再現できる。"""
+
 
 @dataclass(frozen=True)
 class Diagnosis:
@@ -148,6 +152,7 @@ def diagnose_against(
                 going_first=matchup.going_first.win_rate,
                 going_second=matchup.going_second.win_rate,
                 games=games,
+                outcomes=tuple(matchup.outcomes),
             )
         )
     total_share = sum(r.share for r in results)

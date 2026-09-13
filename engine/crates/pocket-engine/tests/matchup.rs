@@ -2,7 +2,9 @@
 
 use pocket_engine::deck::{Deck, parse_deck};
 use pocket_engine::game::Strategy;
-use pocket_engine::matchup::{MatchupError, Record, evaluate_matchup};
+use pocket_engine::matchup::{
+    MatchupError, Outcome, Record, evaluate_matchup, replay_matchup_game,
+};
 
 const FIRE_DECK: &str = "\
 Energy: Fire
@@ -197,4 +199,53 @@ fn 試合数が増えると信頼区間は狭くなる() {
     let (sl, sh) = small.confidence_interval_95().unwrap();
     let (ll, lh) = large.confidence_interval_95().unwrap();
     assert!(lh - ll < sh - sl, "試合数を増やしても狭まっていない");
+}
+
+// --- 1 試合ずつの結果と、その再現 ------------------------------------------
+
+#[test]
+fn 試合ごとの結果を試合の順に返す() {
+    let matchup = evaluate(&fire(), &water(), 21, 3);
+    assert_eq!(matchup.outcomes.len(), 21);
+    // 前半（奇数なら 1 試合多い）が評価対象デッキの先攻
+    let (first, second) = matchup.outcomes.split_at(11);
+    let count = |games: &[Outcome], outcome: Outcome| {
+        u32::try_from(games.iter().filter(|o| **o == outcome).count()).unwrap()
+    };
+    assert_eq!(count(first, Outcome::Win), matchup.going_first.wins);
+    assert_eq!(count(first, Outcome::Loss), matchup.going_first.losses);
+    assert_eq!(count(second, Outcome::Win), matchup.going_second.wins);
+    assert_eq!(count(second, Outcome::Tie), matchup.going_second.ties);
+}
+
+#[test]
+fn 集計した試合をログ付きで同じ流れに再現できる() {
+    for strategy in [Strategy::AttachAttack, "l".parse().expect("方策 l")] {
+        let matchup =
+            evaluate_matchup(&fire(), &water(), strategy, strategy, 8, 5).expect("評価できるはず");
+        for index in 0..8 {
+            let game = replay_matchup_game(&fire(), &water(), strategy, strategy, 8, 5, index)
+                .expect("再現できるはず");
+            assert_eq!(game.a_is_first, index < 4, "{index} 試合目の先攻");
+            assert_eq!(
+                game.outcome, matchup.outcomes[index as usize],
+                "{index} 試合目の結果が集計と違う"
+            );
+        }
+    }
+}
+
+#[test]
+fn 範囲外の試合は再現しない() {
+    let err = replay_matchup_game(
+        &fire(),
+        &water(),
+        Strategy::AttachAttack,
+        Strategy::AttachAttack,
+        8,
+        5,
+        8,
+    )
+    .unwrap_err();
+    assert_eq!(err, MatchupError::GameOutOfRange { index: 8, games: 8 });
 }

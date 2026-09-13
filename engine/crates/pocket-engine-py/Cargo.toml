@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 [dependencies]
 pocket-engine = { workspace = true }
 pyo3 = { workspace = true }
+mimalloc = { version = "0.1", default-features = false }
 
 [lints]
 workspace = true

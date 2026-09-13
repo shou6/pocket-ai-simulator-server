@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from pocket_api.db.models import OptimizationJob
+from pocket_api.optimize.progress import WorkStatus
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -78,9 +79,12 @@ def enqueue(
     return job, False
 
 
-def claim_next(session: Session) -> OptimizationJob | None:
+def claim_next(
+    session: Session, *, games_per_second: float | None = None
+) -> OptimizationJob | None:
     """待ちのジョブを古い順に 1 件取り、実行中にする。無ければ `None`。
 
+    `games_per_second` はこのワーカーの速さ。所要時間の記録を換算するためにジョブへ残す。
     呼び出し側はすぐにコミットして、ロックを手放すこと。
     """
     job = session.scalar(
@@ -95,13 +99,26 @@ def claim_next(session: Session) -> OptimizationJob | None:
     job.status = RUNNING
     job.stage = STAGES[0]
     job.detail = None
+    job.work_done = None
+    job.work_total = None
+    job.remaining_seconds = None
+    job.games_per_second = games_per_second
     job.started_at = datetime.now(UTC)
     session.flush()
     return job
 
 
-def report_progress(session: Session, job_id: uuid.UUID, stage: str, detail: str) -> None:
-    """いまの段階を書き込む。"""
+def report_progress(
+    session: Session,
+    job_id: uuid.UUID,
+    stage: str,
+    detail: str,
+    work: WorkStatus | None = None,
+) -> None:
+    """いまの段階と、済んだ仕事の量・残り時間を書き込む。
+
+    `work` が無ければ前の値を残す。
+    """
     if stage not in STAGES:
         raise ValueError(f"知らない段階です: {stage}")
     job = session.get(OptimizationJob, job_id)
@@ -109,6 +126,9 @@ def report_progress(session: Session, job_id: uuid.UUID, stage: str, detail: str
         return
     job.stage = stage
     job.detail = detail[:255]
+    if work is not None:
+        job.work_done, job.work_total = work.done, work.total
+        job.remaining_seconds = work.remaining_seconds
     session.flush()
 
 

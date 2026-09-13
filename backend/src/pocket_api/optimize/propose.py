@@ -6,6 +6,7 @@ CLI（`optimize.cli`）とジョブ（`jobs.runners`）の両方から呼ぶ。
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -18,6 +19,7 @@ from pocket_api.optimize.dataset import Sample, append_samples, load_samples
 from pocket_api.optimize.evaluate import Evaluation, Opponent, expected_win_rate
 from pocket_api.optimize.features import deck_features
 from pocket_api.optimize.genetic import evolve
+from pocket_api.optimize.progress import WorkMeter
 from pocket_api.optimize.recipe import DeckRecipe, Ownership, violations
 from pocket_api.optimize.search import full_card_pool, hill_climb, pick_card_pool
 from pocket_api.optimize.surrogate import BoostedSurrogate
@@ -174,6 +176,7 @@ def propose(
     required: Mapping[str, int] | None = None,
     excluded: Collection[str] = (),
     progress: Progress = _ignore,
+    meter: WorkMeter | None = None,
 ) -> ProposalReport:
     """メタ環境（または `target` の 1 デッキ）に強いデッキを探す。
 
@@ -213,6 +216,7 @@ def propose(
             raise ValueError("指定のカードで組める種のデッキを作れませんでした")
 
     cache = MatchupCache()
+    work = meter if meter is not None else WorkMeter()
     collected: list[Sample] = []
     scoreboard: dict[tuple[tuple[str, int], ...], tuple[DeckRecipe, float]] = {}
     phase = ["構成を組み替えています"]
@@ -233,6 +237,7 @@ def propose(
             collected.append(
                 Sample.of(text, rate, strategy=settings.strategy, games=settings.games)
             )
+        work.advance()
         if recipe.cards not in scoreboard:
             scoreboard[recipe.cards] = (recipe, rate)
             progress("evaluate", f"{phase[0]}（{len(scoreboard)} 通りを評価）")
@@ -248,6 +253,14 @@ def propose(
 
         predict = predict_with_model
 
+    # 仕事の量の見込み（上限）。GA は世代ごとに集団ぶん、
+    # 山登りは 1 手ごとに screen_keep（モデルが無ければ neighbours）件
+    ga_work = settings.population * (settings.generations + 1)
+    per_step = settings.screen_keep if predict is not None else settings.neighbours
+    climb_work = 1 + settings.climb_steps * per_step
+    recheck_work = settings.top * math.ceil(settings.report_games / settings.games)
+    work.begin(ga_work + climb_work + recheck_work)
+
     started = time.perf_counter()
     evolved = evolve(
         seeds,
@@ -259,6 +272,7 @@ def propose(
         ownership=ownership,
         constraints=constraints,
     )
+    work.reach(ga_work)
     phase[0] = "1 枚ずつ詰めています"
     climbed = hill_climb(
         evolved.recipe,
@@ -282,6 +296,7 @@ def propose(
         if cards != climbed.recipe.cards
     ][: max(0, settings.top - 1)]
     candidates = [climbed.recipe, *runners_up]
+    work.reach(ga_work + climb_work)
     progress("finalize", f"探索とは別の試合で測り直しています（{len(candidates)} 件）")
     ranked = independent_evaluation(
         candidates,
@@ -291,6 +306,7 @@ def propose(
         search_seed=settings.seed,
         cache=cache,
     )
+    work.reach(work.total)
     elapsed = time.perf_counter() - started
 
     written = 0

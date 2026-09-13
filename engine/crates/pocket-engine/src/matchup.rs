@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::deck::Deck;
 use crate::game::{GameError, MatchResult, Strategy, play_one_game};
+use crate::replay::{Replay, play_one_game_with_log};
 
 /// 95% 信頼区間に使う標準正規分布の分位点。
 const Z_95: f64 = 1.959_963_984_540_054;
@@ -22,11 +23,46 @@ pub enum MatchupError {
     #[error("試合数は 1 以上である必要があります")]
     NoGames,
 
+    /// 再現しようとした試合の番号が、試合数を超えている。
+    #[error("{games} 試合のうち {index} 試合目はありません（0 始まり）")]
+    GameOutOfRange {
+        /// 指定された試合の番号（0 始まり）。
+        index: u32,
+        /// 試合数。
+        games: u32,
+    },
+
     /// 試合の実行に失敗した。
     ///
     /// 途中経過は返さない。一部の試合だけ落ちた集計は勝率を歪めるため。
     #[error(transparent)]
     Engine(#[from] GameError),
+}
+
+/// 1 試合の結果。評価対象デッキから見た値。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// 勝ち。
+    Win,
+    /// 負け。
+    Loss,
+    /// 引き分け。
+    Tie,
+    /// 決着がつかなかった。
+    Unfinished,
+}
+
+impl Outcome {
+    /// 対戦の結果（プレイヤー 0 が先攻）を、評価対象デッキから見た結果に直す。
+    fn of(result: MatchResult, a_is_first: bool) -> Self {
+        match result {
+            MatchResult::PlayerA if a_is_first => Self::Win,
+            MatchResult::PlayerB if !a_is_first => Self::Win,
+            MatchResult::PlayerA | MatchResult::PlayerB => Self::Loss,
+            MatchResult::Tie => Self::Tie,
+            MatchResult::Unfinished => Self::Unfinished,
+        }
+    }
 }
 
 /// ある座席（先攻または後攻）での成績。すべて評価対象デッキから見た値。
@@ -99,18 +135,12 @@ impl Record {
     }
 
     /// 1 試合の結果を加算する。
-    fn add(&mut self, result: MatchResult, is_first: bool) {
-        // 評価対象デッキから見た結果に直す
-        let won = match result {
-            MatchResult::PlayerA => Some(is_first),
-            MatchResult::PlayerB => Some(!is_first),
-            MatchResult::Tie | MatchResult::Unfinished => None,
-        };
-        match (won, result) {
-            (Some(true), _) => self.wins += 1,
-            (Some(false), _) => self.losses += 1,
-            (None, MatchResult::Tie) => self.ties += 1,
-            (None, _) => self.unfinished += 1,
+    fn add(&mut self, outcome: Outcome) {
+        match outcome {
+            Outcome::Win => self.wins += 1,
+            Outcome::Loss => self.losses += 1,
+            Outcome::Tie => self.ties += 1,
+            Outcome::Unfinished => self.unfinished += 1,
         }
     }
 
@@ -141,6 +171,9 @@ pub struct Matchup {
     pub seed: u64,
     /// 対戦に使った deckgym のコミットハッシュ。
     pub deckgym_revision: &'static str,
+    /// 試合ごとの結果。試合の順（前半が評価対象デッキの先攻）。
+    /// [`replay_matchup_game`] に番号を渡すと、その試合をログ付きで再現できる。
+    pub outcomes: Vec<Outcome>,
 }
 
 impl Matchup {
@@ -171,40 +204,30 @@ pub fn evaluate_matchup(
         return Err(MatchupError::NoGames);
     }
 
-    // 試合ごとのシードを先に決めておく。並列実行の順序に結果が左右されないようにするため
-    let mut rng = StdRng::seed_from_u64(seed);
-    let seeds: Vec<u64> = (0..games).map(|_| rng.r#gen()).collect();
-
-    // 前半は deck_a が先攻、後半は deck_b が先攻。奇数なら deck_a の先攻が 1 試合多い
-    let first_half = games.div_ceil(2) as usize;
-
-    let (going_first, going_second) = seeds
+    let outcomes: Vec<Outcome> = game_plan(games, seed)
         .par_iter()
-        .enumerate()
         .map(
-            |(index, &game_seed)| -> Result<(Record, Record), MatchupError> {
-                let a_is_first = index < first_half;
+            |&(game_seed, a_is_first)| -> Result<Outcome, MatchupError> {
                 let result = if a_is_first {
                     play_one_game(deck_a, deck_b, strategy_a, strategy_b, game_seed)?
                 } else {
                     play_one_game(deck_b, deck_a, strategy_b, strategy_a, game_seed)?
                 };
-
-                let mut record = Record::default();
-                record.add(result, a_is_first);
-                Ok(if a_is_first {
-                    (record, Record::default())
-                } else {
-                    (Record::default(), record)
-                })
+                Ok(Outcome::of(result, a_is_first))
             },
         )
-        .try_reduce(
-            || (Record::default(), Record::default()),
-            |acc: (Record, Record), item: (Record, Record)| {
-                Ok((acc.0.merge(item.0), acc.1.merge(item.1)))
-            },
-        )?;
+        .collect::<Result<_, _>>()?;
+
+    let first_half = games.div_ceil(2) as usize;
+    let mut going_first = Record::default();
+    let mut going_second = Record::default();
+    for (index, outcome) in outcomes.iter().enumerate() {
+        if index < first_half {
+            going_first.add(*outcome);
+        } else {
+            going_second.add(*outcome);
+        }
+    }
 
     Ok(Matchup {
         going_first,
@@ -213,5 +236,62 @@ pub fn evaluate_matchup(
         strategy_b: strategy_b.code(),
         seed,
         deckgym_revision: crate::deckgym_revision(),
+        outcomes,
+    })
+}
+
+/// 試合ごとの（シード, 評価対象デッキが先攻か）。
+///
+/// シードはマスターシードから決定的に導出する。並列実行の順序に結果が左右されないよう、先に決めておく。
+/// 前半は評価対象デッキが先攻、後半は後攻。奇数なら先攻が 1 試合多い。
+fn game_plan(games: u32, seed: u64) -> Vec<(u64, bool)> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let first_half = games.div_ceil(2);
+    (0..games)
+        .map(|index| (rng.r#gen(), index < first_half))
+        .collect()
+}
+
+/// [`evaluate_matchup`] で集計した 1 試合を、ログ付きで再現した結果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchupGame {
+    /// 対戦の記録。プレイヤー 0 が先攻。
+    pub replay: Replay,
+    /// 評価対象デッキが先攻だったか。`false` なら記録のプレイヤー 1 が評価対象デッキ。
+    pub a_is_first: bool,
+    /// 評価対象デッキから見た結果。
+    pub outcome: Outcome,
+}
+
+/// [`evaluate_matchup`] と同じ引数で、`index` 試合目（0 始まり）をログ付きで再現する。
+///
+/// シードと先攻を同じ手順で決めるので、集計した試合とまったく同じ流れになる。
+///
+/// # Errors
+///
+/// `index` が `games` 以上なら [`MatchupError::GameOutOfRange`]。
+pub fn replay_matchup_game(
+    deck_a: &Deck,
+    deck_b: &Deck,
+    strategy_a: Strategy,
+    strategy_b: Strategy,
+    games: u32,
+    seed: u64,
+    index: u32,
+) -> Result<MatchupGame, MatchupError> {
+    if index >= games {
+        return Err(MatchupError::GameOutOfRange { index, games });
+    }
+    let (game_seed, a_is_first) = game_plan(games, seed)[index as usize];
+    let replay = if a_is_first {
+        play_one_game_with_log(deck_a, deck_b, strategy_a, strategy_b, game_seed)?
+    } else {
+        play_one_game_with_log(deck_b, deck_a, strategy_b, strategy_a, game_seed)?
+    };
+    let outcome = Outcome::of(replay.result, a_is_first);
+    Ok(MatchupGame {
+        replay,
+        a_is_first,
+        outcome,
     })
 }

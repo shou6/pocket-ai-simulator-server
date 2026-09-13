@@ -14,6 +14,7 @@ from pocket_api.ingest.store import import_snapshot
 from pocket_api.jobs import queue, runners
 from pocket_api.jobs.worker import run_once
 from pocket_api.optimize.evaluate import Evaluation
+from pocket_api.optimize.progress import WorkMeter, WorkStatus
 from pocket_api.optimize.propose import ProposalReport
 from pocket_api.optimize.recipe import DeckRecipe
 from pocket_api.optimize.refine import RefineReport, Swap
@@ -102,6 +103,52 @@ def test_worker_runs_a_job_and_records_progress_and_result(db_session: Session) 
     assert job.result == {"games": 60}
     assert job.finished_at is not None
     assert run_once(_opener(db_session), {"fake": fake}) is False
+
+
+def test_worker_records_its_speed_on_the_job_and_the_amount_of_work(db_session: Session) -> None:
+    job, _ = queue.enqueue(db_session, "fake", {"games": 60}, strategy="l")
+
+    def fake(params: dict[str, Any], progress: Any) -> dict[str, Any]:
+        progress("evaluate", "1 枚目の入れ替えを探しています", WorkStatus(3, 12, 270))
+        return {}
+
+    assert run_once(_opener(db_session), {"fake": fake}, games_per_second=42.5) is True
+    db_session.refresh(job)
+    assert job.games_per_second == 42.5
+    assert (job.work_done, job.work_total, job.remaining_seconds) == (3, 12, 270)
+
+
+def test_remaining_time_counts_down_from_the_last_report(db_session: Session) -> None:
+    from datetime import timedelta
+
+    from pocket_api.jobs.estimates import remaining_seconds
+
+    job, _ = queue.enqueue(db_session, "fake", {"games": 60}, strategy="l")
+    queue.claim_next(db_session)
+    queue.report_progress(db_session, job.id, "evaluate", "探しています", WorkStatus(5, 20, 300))
+    db_session.refresh(job)
+    reported = job.updated_at
+    assert remaining_seconds(job, reported + timedelta(seconds=40)) == 260
+    queue.report_progress(db_session, job.id, "evaluate", "探しています", None)
+    assert job.remaining_seconds == 300, "仕事の量を出さない報告では前の値を残す"
+    assert remaining_seconds(job, reported + timedelta(seconds=400)) == 0
+    queue.complete(db_session, job.id, {})
+    assert remaining_seconds(job, reported) is None
+
+
+def test_work_meter_measures_from_the_start_of_the_work() -> None:
+    now = [100.0]
+    meter = WorkMeter(clock=lambda: now[0])
+    assert meter.status() is None
+    now[0] = 130.0  # 準備に 30 秒（残り時間に混ぜない）
+    meter.begin(10)
+    assert meter.status() == WorkStatus(0, 10, None)
+    now[0] = 150.0
+    meter.advance(2)
+    assert meter.status() == WorkStatus(2, 10, 80)
+    meter.reach(9)
+    meter.advance(5)
+    assert meter.status() == WorkStatus(10, 10, 0)
 
 
 def test_worker_records_failures(db_session: Session) -> None:
@@ -292,7 +339,7 @@ def test_estimates_come_from_finished_jobs_once_there_are_any(
     from datetime import UTC, datetime, timedelta
 
     before = seeded.get("/jobs/estimates").json()
-    assert before["optimize"]["60"] == {"seconds": 300, "samples": 0}
+    assert before["optimize"]["60"] == {"seconds": 300, "samples": 0, "basis": "default"}
 
     start = datetime(2026, 9, 13, tzinfo=UTC)
     for minutes in (8, 10, 30):
@@ -303,8 +350,41 @@ def test_estimates_come_from_finished_jobs_once_there_are_any(
     db_session.flush()
 
     after = seeded.get("/jobs/estimates").json()
-    assert after["optimize"]["60"] == {"seconds": 600, "samples": 3}
+    assert after["optimize"]["60"] == {"seconds": 600, "samples": 3, "basis": "history"}
     assert after["optimize"]["200"]["samples"] == 0
     registered = seeded.post("/jobs/optimize", json={"games": 60}).json()
     assert registered["estimate_seconds"] == 600
     assert registered["estimate_samples"] == 3
+
+
+def test_estimates_follow_the_speed_the_worker_measured(
+    db_session: Session, seeded: TestClient
+) -> None:
+    """CPU の少ないマシンでは、定数の目安をワーカーの速さで換算する。記録も速さで直して使う。"""
+    from datetime import UTC, datetime, timedelta
+
+    from pocket_api.jobs.estimates import REFERENCE_SPEED
+    from pocket_api.jobs.speed import record_speed
+
+    record_speed(db_session, REFERENCE_SPEED / 4)  # 定数を測ったマシンの 4 分の 1 の速さ
+    body = seeded.get("/jobs/estimates").json()
+    assert body["improve"]["200"] == {"seconds": 630 * 4, "samples": 0, "basis": "speed"}
+    assert body["diagnose"]["200"]["basis"] == "speed"
+    assert body["diagnose"]["200"]["seconds"] > body["diagnose"]["60"]["seconds"]
+
+    # 2 倍速いワーカーで 10 分かかった記録は、いまのワーカーでは 20 分
+    start = datetime(2026, 9, 14, tzinfo=UTC)
+    job, _ = queue.enqueue(db_session, "optimize", {"games": 60, "n": 1}, strategy="l")
+    job.status = queue.DONE
+    job.started_at = start
+    job.finished_at = start + timedelta(minutes=10)
+    job.games_per_second = REFERENCE_SPEED / 2
+    db_session.flush()
+    after = seeded.get("/jobs/estimates").json()
+    assert after["optimize"]["60"] == {"seconds": 1200, "samples": 1, "basis": "history"}
+
+
+def test_measures_the_speed_of_the_engine() -> None:
+    from pocket_api.jobs.speed import measure_speed
+
+    assert measure_speed(min_seconds=0.01, snapshot=SNAPSHOT) > 0

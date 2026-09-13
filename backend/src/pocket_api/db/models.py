@@ -187,3 +187,26 @@ class OptimizationJob(Base, TimestampMixin):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    games_per_second: Mapped[float | None] = mapped_column(Float)
+    """実行したワーカーの対戦の速さ（`jobs.speed`）。所要時間の記録を、いまのワーカーの速さに換算するのに使う。"""
+
+    work_done: Mapped[int | None] = mapped_column(Integer)
+    """済んだ仕事の量（デッキの評価 1 回を 1 とする）。`work_total` と合わせて残り時間を出す。"""
+
+    work_total: Mapped[int | None] = mapped_column(Integer)
+    """仕事の量の見込み（上限）。探索は途中で止まることがあるので、実際はこれより少なく済む。"""
+
+    remaining_seconds: Mapped[int | None] = mapped_column(Integer)
+    """最後に進捗を書いた時点の残り時間の見込み（`updated_at` からの経過を引いて使う）。"""
+
+
+class WorkerSpeed(Base, TimestampMixin):
+    """ワーカーが起動時に測った対戦の速さ。本番と手元でマシンが違っても所要時間の目安を合わせる。"""
+
+    __tablename__ = "worker_speeds"
+
+    games_per_second: Mapped[float] = mapped_column(Float, nullable=False)
+    """環境の上位デッキどうしを方策 `l` で戦わせたときの 1 秒あたりの試合数。"""
+
+    threads: Mapped[int] = mapped_column(Integer, nullable=False)
+    """測ったときに使えた CPU の数（参考）。"""

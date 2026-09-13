@@ -6,6 +6,13 @@
 //! Rust 側のエラーはすべて `ValueError` に変換する。Python から panic を
 //! 見せないことがこの層の責務（`.claude/rules/engine.md`）。
 
+// メモリ確保を mimalloc にする。方策 `l` は先読みで盤面を何度も複製し、確保と解放が多い。
+// システムの malloc から替えると、B4a の上位 4 デッキの総当たりで 1 スレッド毎秒 22.7 → 47.6 試合、
+// 12 スレッドで 85.9 → 162.4 試合になった（2026-09-14、i7-8700T）。結果（勝敗）は変わらない。
+// ライブラリの pocket-engine ではなく、最終成果物のバインディング側で指定する。
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -15,7 +22,9 @@ use pocket_engine::cards::{
 };
 use pocket_engine::deck::{infer_energy_line, parse_deck, parse_deck_inferring_energy};
 use pocket_engine::game::Strategy;
-use pocket_engine::matchup::{Record, evaluate_matchup as evaluate};
+use pocket_engine::matchup::{
+    Outcome, Record, evaluate_matchup as evaluate, replay_matchup_game as replay_matchup,
+};
 use pocket_engine::replay::{CardRef, PokemonSnapshot, Replay, ReplayStep, play_one_game_with_log};
 
 /// エンジンのバージョン文字列を返す。
@@ -169,6 +178,7 @@ impl From<ReplayStep> for PyReplayStep {
 
 /// 1 試合分の記録。
 #[pyclass(name = "Replay", frozen, get_all, skip_from_py_object)]
+#[derive(Clone)]
 pub struct PyReplay {
     /// 行動の並び。
     pub steps: Vec<PyReplayStep>,
@@ -442,6 +452,17 @@ pub struct PyMatchup {
     pub deckgym_revision: &'static str,
     /// 対戦に使ったエンジンのバージョン。
     pub engine_version: &'static str,
+    /// 試合ごとの結果（`win` / `loss` / `tie` / `unfinished`）。試合の順で、前半が評価対象デッキの先攻。
+    pub outcomes: Vec<&'static str>,
+}
+
+fn outcome_name(outcome: Outcome) -> &'static str {
+    match outcome {
+        Outcome::Win => "win",
+        Outcome::Loss => "loss",
+        Outcome::Tie => "tie",
+        Outcome::Unfinished => "unfinished",
+    }
 }
 
 #[pymethods]
@@ -490,6 +511,49 @@ fn evaluate_matchup(
         seed: matchup.seed,
         deckgym_revision: matchup.deckgym_revision,
         engine_version: pocket_engine::engine_version(),
+        outcomes: matchup.outcomes.iter().map(|o| outcome_name(*o)).collect(),
+    })
+}
+
+/// 相性評価の 1 試合を、ログ付きで再現した結果。
+#[pyclass(name = "MatchupGame", frozen, get_all, skip_from_py_object)]
+pub struct PyMatchupGame {
+    /// 対戦の記録。プレイヤー 0 が先攻。
+    pub replay: PyReplay,
+    /// 評価対象デッキが先攻だったか。
+    pub a_is_first: bool,
+    /// 評価対象デッキから見た結果（`win` / `loss` / `tie` / `unfinished`）。
+    pub outcome: &'static str,
+}
+
+/// `evaluate_matchup` と同じ引数で、`index` 試合目（0 始まり）をログ付きで再現する。
+#[pyfunction]
+#[pyo3(signature = (deck_a, deck_b, strategy_a, strategy_b, games, seed, index))]
+#[allow(clippy::too_many_arguments)]
+fn replay_matchup_game(
+    py: Python<'_>,
+    deck_a: &str,
+    deck_b: &str,
+    strategy_a: &str,
+    strategy_b: &str,
+    games: u32,
+    seed: u64,
+    index: u32,
+) -> PyResult<PyMatchupGame> {
+    let to_value_error = |err: &dyn std::fmt::Display| PyValueError::new_err(err.to_string());
+
+    let deck_a = parse_deck(deck_a).map_err(|err| to_value_error(&err))?;
+    let deck_b = parse_deck(deck_b).map_err(|err| to_value_error(&err))?;
+    let strategy_a: Strategy = strategy_a.parse().map_err(|err| to_value_error(&err))?;
+    let strategy_b: Strategy = strategy_b.parse().map_err(|err| to_value_error(&err))?;
+
+    let game = py
+        .detach(|| replay_matchup(&deck_a, &deck_b, strategy_a, strategy_b, games, seed, index))
+        .map_err(|err| to_value_error(&err))?;
+    Ok(PyMatchupGame {
+        replay: game.replay.into(),
+        a_is_first: game.a_is_first,
+        outcome: outcome_name(game.outcome),
     })
 }
 
@@ -505,6 +569,7 @@ fn pocket_engine_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyReplay>()?;
     m.add_class::<PyRecord>()?;
     m.add_class::<PyMatchup>()?;
+    m.add_class::<PyMatchupGame>()?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(deckgym_revision, m)?)?;
     m.add_function(wrap_pyfunction!(validate_deck, m)?)?;
@@ -514,5 +579,6 @@ fn pocket_engine_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(incomplete_card_statuses, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_matchup, m)?)?;
     m.add_function(wrap_pyfunction!(replay_game, m)?)?;
+    m.add_function(wrap_pyfunction!(replay_matchup_game, m)?)?;
     Ok(())
 }
